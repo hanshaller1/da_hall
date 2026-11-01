@@ -342,7 +342,10 @@ function selectSource(kind) {
   srcKind = kind;
   document.querySelectorAll('.seg [role=tab]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.src === kind)));
   document.querySelectorAll('.src-pane').forEach((p) => { p.hidden = p.dataset.pane !== kind; });
-  if (kind === 'live') refreshDevices();
+  if (kind === 'live') {
+    refreshDevices();
+    refreshOutputs();
+  }
   updateTransport();
 }
 
@@ -354,13 +357,27 @@ async function ensureEngine() {
   setStatus('Audio wird gestartet …');
   try {
     engine.params = toEngine(state, live);
-    await engine.init();
-    display.setAnalyser(engine.analyser);
     engine.onMeter = (m) => display.setMeter(m);
     engine.onSourceEnded = () => {
       playing = false;
       updateTransport();
     };
+    // neuer Kontext (andere Abtastrate des Eingangsgeräts): Anzeige und Aufnahme neu verbinden
+    engine.onRebuild = () => {
+      display.setAnalyser(engine.analyser);
+      if (recording) resetRecordUI('Aufnahme beendet, weil sich die Abtastrate geändert hat.');
+      updateStatus();
+    };
+    engine.onLiveEnded = () => {
+      playing = false;
+      display.status.live = false;
+      $('live-info').textContent = '';
+      setNote('Das Eingangsgerät wurde getrennt.');
+      updateTransport();
+      refreshDevices();
+    };
+    await engine.init();
+    display.setAnalyser(engine.analyser);
     $('rec-btn').disabled = !engine.canRecord;
     updateStatus();
     return true;
@@ -375,7 +392,8 @@ function updateStatus() {
   if (!engine.ctx) return;
   const sr = (engine.ctx.sampleRate / 1000).toFixed(1);
   const lat = engine.latencyMs;
-  setStatus(`${sr} kHz${lat ? ` · Latenz ca. ${Math.round(lat)} ms` : ''}${playing ? ' · läuft' : ''}`);
+  const liveOn = playing && srcKind === 'live';
+  setStatus(`${sr} kHz${lat ? ` · Latenz ca. ${Math.round(lat)} ms` : ''}${liveOn ? ' · Live' : playing ? ' · läuft' : ''}`);
 }
 
 async function startSource() {
@@ -390,8 +408,12 @@ async function startSource() {
       }
       engine.playBuffer(engine.fileBuffer, { loop: $('file-loop').checked });
     } else {
-      await engine.startLive($('device-select').value || undefined);
+      const info = await engine.startLive($('device-select').value || undefined);
+      fillChannels(info.channels);
+      const name = info.label || 'Eingang';
+      $('live-info').textContent = `${name} · ${info.channels} ${info.channels === 1 ? 'Kanal' : 'Kanäle'} · ${(info.sampleRate / 1000).toFixed(1)} kHz`;
       refreshDevices();
+      refreshOutputs();
     }
     playing = true;
     setNote('');
@@ -399,9 +421,14 @@ async function startSource() {
     console.error(err);
     playing = false;
     if (srcKind === 'live') {
-      setNote(err && err.name === 'NotAllowedError'
-        ? 'Zugriff auf den Eingang wurde verweigert. Erlaube das Mikrofon in den Browser-Einstellungen und versuche es erneut.'
-        : 'Kein Audioeingang gefunden. Schließe ein Interface oder Mikrofon an und versuche es erneut.');
+      const n = err && err.name;
+      setNote(n === 'NotAllowedError' || n === 'SecurityError'
+        ? 'Zugriff auf den Eingang wurde verweigert. Erlaube Mikrofon/Audioeingang in den Browser-Einstellungen für diese Seite und versuche es erneut.'
+        : n === 'NotReadableError'
+          ? 'Das Gerät ist belegt oder lieferte kein Signal. Schließe andere Programme, die es exklusiv nutzen (z. B. eine DAW), und versuche es erneut.'
+          : n === 'OverconstrainedError'
+            ? 'Das gewählte Gerät ist nicht mehr verfügbar. Wähle ein anderes Eingangsgerät.'
+            : 'Kein Audioeingang gefunden. Schließe ein Interface oder Mikrofon an und versuche es erneut.');
     } else {
       setNote('Wiedergabe fehlgeschlagen.');
     }
@@ -414,6 +441,7 @@ function stopSource() {
   engine.stopSource();
   playing = false;
   display.status.live = false;
+  $('live-info').textContent = '';
   updateTransport();
 }
 
@@ -453,27 +481,115 @@ const drop = $('drop');
 ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('is-over'); }));
 drop.addEventListener('drop', (e) => loadFile(e.dataTransfer.files[0]));
 
-// Geräte
-async function refreshDevices() {
-  const sel = $('device-select');
-  const cur = sel.value;
-  const devs = await engine.listInputs();
-  sel.innerHTML = '<option value="">Standard-Eingang</option>';
-  devs.forEach((d, i) => {
-    if (!d.deviceId || d.deviceId === 'default') return;
+// Geräte (Eingang, Kanäle, Ausgang) – letzte Auswahl wird pro Browser gemerkt
+const IO_KEY = 'da-hall:io';
+function loadIO() {
+  try {
+    return JSON.parse(localStorage.getItem(IO_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+function saveIO(patch) {
+  try {
+    localStorage.setItem(IO_KEY, JSON.stringify({ ...loadIO(), ...patch }));
+  } catch { /* privates Fenster */ }
+}
+const savedIO = loadIO();
+if (savedIO.channels) engine.channelSel = savedIO.channels;
+if (savedIO.output) engine.sinkId = savedIO.output;
+
+function fillSelect(sel, devs, defLabel, fallbackName, preferred) {
+  const cur = sel.value || preferred || '';
+  sel.innerHTML = '';
+  const def = document.createElement('option');
+  def.value = '';
+  def.textContent = defLabel;
+  sel.appendChild(def);
+  let n = 0;
+  for (const d of devs) {
+    if (!d.deviceId || d.deviceId === 'default' || d.deviceId === 'communications') continue;
+    n += 1;
     const o = document.createElement('option');
     o.value = d.deviceId;
-    o.textContent = d.label || `Eingang ${i + 1}`;
+    o.textContent = d.label || `${fallbackName} ${n}`;
     sel.appendChild(o);
-  });
+  }
   sel.value = [...sel.options].some((o) => o.value === cur) ? cur : '';
 }
-$('device-select').addEventListener('change', () => {
+
+async function refreshDevices() {
+  const devs = await engine.listInputs();
+  fillSelect($('device-select'), devs, 'Standard-Eingang', 'Eingang', savedIO.device);
+  // ohne Freigabe liefern Browser keine Gerätenamen
+  $('grant-btn').hidden = !devs.length || devs.some((d) => d.label);
+}
+
+async function refreshOutputs() {
+  if (!engine.canSelectOutput) return;
+  $('output-field').hidden = false;
+  fillSelect($('output-select'), await engine.listOutputs(), 'System-Standard', 'Ausgang', engine.sinkId);
+}
+
+function fillChannels(count) {
+  const sel = $('channel-select');
+  const opts = Engine.channelOptions(count);
+  sel.innerHTML = '';
+  for (const o of opts) {
+    const el = document.createElement('option');
+    el.value = o.value;
+    el.textContent = o.label;
+    sel.appendChild(el);
+  }
+  const want = opts.some((o) => o.value === engine.channelSel) ? engine.channelSel : opts[0].value;
+  sel.value = want;
+  sel.disabled = opts.length < 2;
+  engine.routeChannels(want);
+}
+
+$('device-select').addEventListener('change', (e) => {
+  savedIO.device = e.target.value;
+  saveIO({ device: e.target.value });
   if (playing && srcKind === 'live') startSource();
+});
+$('channel-select').addEventListener('change', (e) => {
+  engine.routeChannels(e.target.value);
+  saveIO({ channels: e.target.value });
+  display.showValue('KANÄLE', e.target.selectedOptions[0].textContent.toUpperCase());
+});
+$('output-select').addEventListener('change', async (e) => {
+  try {
+    await engine.setOutput(e.target.value);
+    saveIO({ output: e.target.value });
+    setNote('');
+  } catch {
+    e.target.value = engine.sinkId = '';
+    setNote('Dieses Ausgabegerät lässt sich nicht verwenden. Es bleibt beim System-Standard.');
+  }
+});
+$('grant-btn').addEventListener('click', async () => {
+  try {
+    await engine.requestDeviceAccess();
+  } catch {
+    setNote('Ohne Freigabe zeigt der Browser keine Gerätenamen an.');
+  }
+  refreshDevices();
+  refreshOutputs();
+});
+navigator.mediaDevices?.addEventListener?.('devicechange', () => {
+  if (srcKind !== 'live') return;
+  refreshDevices();
+  refreshOutputs();
 });
 
 // Aufnahme
 let recording = false;
+function resetRecordUI(msg) {
+  recording = false;
+  $('rec-btn').textContent = 'Aufnehmen';
+  $('rec-btn').classList.remove('is-rec');
+  if (msg) setNote(msg);
+}
 $('rec-btn').addEventListener('click', async () => {
   if (!engine.ready) return;
   if (!recording) {
@@ -487,9 +603,7 @@ $('rec-btn').addEventListener('click', async () => {
       setNote('Aufnahme wird von diesem Browser nicht unterstützt.');
     }
   } else {
-    recording = false;
-    $('rec-btn').textContent = 'Aufnehmen';
-    $('rec-btn').classList.remove('is-rec');
+    resetRecordUI('');
     const blob = await engine.stopRecording();
     if (blob) {
       const ext = blob.type.includes('ogg') ? 'ogg' : blob.type.includes('mp4') ? 'm4a' : 'webm';

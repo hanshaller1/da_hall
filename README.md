@@ -57,9 +57,27 @@ Unterstützt werden aktuelle Versionen von Chrome, Edge, Firefox und Safari.
 
 - **Demo:** synthetische Gitarre (Karplus-Strong) mit den Mustern Arpeggio, Akkorde, Staccato und Impuls
 - **Datei:** beliebige Audiodatei per Auswahl oder Drag & Drop
-- **Live-Eingang:** Mikrofon oder Audio-Interface. Echo-Unterdrückung, Rauschfilter und automatische Pegelanpassung sind abgeschaltet. **Kopfhörer benutzen!**
+- **Live-Eingang:** Audio-Interface, Synth/Drum-Machine per USB, Mikrofon. **Kopfhörer benutzen!** Details unten.
 - **Aufnehmen:** schneidet den Live-Ausgang mit (WebM/Opus)
 - **Als WAV rendern:** rendert Demo oder Datei offline inklusive vollständiger Hallfahne als 24-Bit-WAV
+
+### Live-Eingang: Interface, Syntakt & Co.
+
+Jedes Gerät, das dein Betriebssystem als Audioeingang kennt, lässt sich verwenden: USB-Audio-Interfaces,
+class-compliant Synths und Drum-Machines (z. B. ein Elektron Syntakt im USB-Audio-Modus), Mischpulte mit USB, Mikrofone.
+
+- **Eingangsgerät:** Auswahl im Tab „Live-Eingang“. Vor der ersten Freigabe zeigen Browser keine Gerätenamen; dafür gibt es „Gerätenamen anzeigen“. Die letzte Wahl wird gemerkt.
+- **Kanäle:** Stereopaare (1+2, 3+4, …) oder ein einzelner Kanal, der auf beide Seiten gelegt wird. Gitarre an Eingang 1 → „Kanal 1 (Mono)“. Lässt sich während des Spielens umschalten.
+- **Abtastrate:** Der Audio-Kontext übernimmt automatisch die Rate des Geräts (z. B. 48 kHz). So entfällt das Resampling, was Latenz spart, und Firefox funktioniert überhaupt erst damit.
+- **Ausgabegerät:** In Chrome und Edge kann der Ausgang direkt auf ein Interface gelegt werden, z. B. um den Hall wieder aufzunehmen.
+- **Hotplug:** Neu angeschlossene Geräte erscheinen sofort. Wird das aktive Gerät getrennt, stoppt der Eingang mit einem Hinweis.
+- **Direct Monitoring:** Hört dein Interface das Eingangssignal schon selbst ab, schalte „Kill Dry“ ein. Sonst hörst du das trockene Signal doppelt und leicht verzögert.
+- Echo-Unterdrückung, Rauschfilter und automatische Pegelanpassung des Browsers sind abgeschaltet.
+
+Grenzen:
+- **Kanalzahl:** Die meisten Browser (insbesondere Chrome) liefern pro Gerät nur die ersten zwei Kanäle. Bei Mehrkanal-Interfaces oder Overbridge-Mehrspur kommen also die Kanäle 1/2 bzw. die Summe an. Die Kanalwahl bietet automatisch alles an, was der Browser tatsächlich liefert.
+- **Sichere Verbindung nötig:** Der Eingang funktioniert nur über `https://` oder `http://localhost`.
+- **Veröffentlichte claude.ai-Version:** Dort gibt es keinen Eingang, weil Seiten auf claude.ai keinen Mikrofon- oder Interface-Zugriff bekommen.
 
 ### Presets
 
@@ -113,7 +131,7 @@ js/params.js            Parameter-Definitionen und Mapping auf DSP-Einheiten
 js/presets.js           Werkspresets, Speichern/Teilen
 js/ui/controls.js       Drehregler, Fader, Modus-Wahlschalter, Kippschalter, Fußschalter
 js/ui/display.js        VFD-Anzeige (Werte, Spektrum, Pegel, Status)
-js/audio/engine.js      Audio-Graph, Quellen, Aufnahme, Offline-Render
+js/audio/engine.js      Audio-Graph, Quellen, Live-Eingang (Kanäle, Abtastrate, Ausgabegerät), Aufnahme, Offline-Render
 js/audio/reverb-processor.js   DSP (AudioWorklet)
 js/audio/demo.js        Demo-Signale (Karplus-Strong)
 js/audio/wav.js         WAV-Encoder (24 Bit)

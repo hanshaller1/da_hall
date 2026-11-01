@@ -453,6 +453,11 @@ h3 {
 .drop-main { font-weight: 600; overflow-wrap: anywhere; }
 
 .field { display: grid; gap: 6px; font-size: 13px; color: var(--print-dim); min-width: 0; }
+.io-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.io-grid select { width: 100%; }
+.live-info { font-family: var(--font-mono); font-size: 12px; color: var(--led); }
+.src-pane { display: grid; gap: 12px; justify-items: start; }
+.src-pane > .io-grid, .src-pane > .drop { justify-self: stretch; }
 select, input[type='text'] {
   background: var(--stage); border: 1px solid var(--line); border-radius: 8px;
   padding: 8px 10px; color: var(--print); min-width: 0; max-width: 100%;

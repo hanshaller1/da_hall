@@ -74,11 +74,24 @@
         </div>
 
         <div class="src-pane" data-pane="live" hidden>
-          <label class="field">
-            <span>Eingangsgerät</span>
-            <select id="device-select"><option value="">Standard-Eingang</option></select>
-          </label>
-          <p class="note warn">Kopfhörer benutzen: Mit Lautsprechern und Mikrofon entsteht sofort eine Rückkopplung. Für Gitarre ein Audio-Interface verwenden und unter „Eingang“ den richtigen Kanal wählen.</p>
+          <div class="io-grid" id="io-grid">
+            <label class="field">
+              <span>Eingangsgerät</span>
+              <select id="device-select"><option value="">Standard-Eingang</option></select>
+            </label>
+            <label class="field">
+              <span>Kanäle</span>
+              <select id="channel-select" disabled><option value="p0">1 + 2 (Stereo)</option></select>
+            </label>
+            <label class="field" id="output-field" hidden>
+              <span>Ausgabegerät</span>
+              <select id="output-select"><option value="">System-Standard</option></select>
+            </label>
+          </div>
+          <button type="button" class="btn btn-small" id="grant-btn" hidden>Gerätenamen anzeigen</button>
+          <p class="note live-info" id="live-info" aria-live="polite"></p>
+          <p class="note">Interface, Synth oder Drum-Machine per USB (z.&nbsp;B. ein Elektron Syntakt im USB-Audio-Modus) erscheinen hier als Eingangsgerät. Gitarre an Eingang&nbsp;1: „Kanal&nbsp;1 (Mono)“ wählen. Hört dein Interface das Signal direkt ab (Direct Monitoring), schalte unten „Kill Dry“ ein, sonst klingt das trockene Signal doppelt.</p>
+          <p class="note warn">Kopfhörer benutzen: Mit Lautsprechern und Mikrofon entsteht sofort eine Rückkopplung.</p>
         </div>
 
         <div class="transport">

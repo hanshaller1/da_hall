@@ -1,4 +1,5 @@
 // Audio-Graph: Quelle → AudioWorklet (DA HALL) → Analyser → Ausgang (+ Recorder).
+// Live-Eingang: getUserMedia → ChannelSplitter → (Kanalwahl) → ChannelMerger → Worklet.
 
 import { renderDemo } from './demo.js';
 import { encodeWav } from './wav.js';
@@ -16,18 +17,34 @@ export class Engine {
     this.onMeter = null;
     this.onSourceEnded = null;
     this.recorder = null;
+    this.onRebuild = null; // Kontext wurde (z. B. wegen anderer Abtastrate) neu aufgebaut
+    this.onLiveEnded = null; // Eingangsgerät wurde getrennt
+    this.sinkId = '';
+    this.channelSel = 'p0';
+    this.built = false;
   }
 
   get ready() {
     return !!this.node;
   }
 
-  async init() {
+  /**
+   * Startet (oder reaktiviert) den Audio-Kontext. Mit `sampleRate` wird der Kontext bei Bedarf
+   * mit dieser Rate neu aufgebaut, damit ein Eingangsgerät ohne Resampling läuft
+   * (Firefox verlangt das sogar, Chrome spart sich damit Latenz).
+   */
+  async init({ sampleRate } = {}) {
+    if (this.ctx && sampleRate && this.ctx.sampleRate !== sampleRate) await this.teardown();
     if (this.ctx) {
       if (this.ctx.state !== 'running') await this.ctx.resume();
       return;
     }
-    const ctx = new AudioContext({ latencyHint: 'interactive' });
+    let ctx;
+    try {
+      ctx = new AudioContext(sampleRate ? { latencyHint: 'interactive', sampleRate } : { latencyHint: 'interactive' });
+    } catch {
+      ctx = new AudioContext({ latencyHint: 'interactive' });
+    }
     this.ctx = ctx;
     await ctx.audioWorklet.addModule(PROCESSOR_URL);
     this.node = new AudioWorkletNode(ctx, 'da-hall-reverb', {
@@ -49,7 +66,24 @@ export class Engine {
     this.analyser.smoothingTimeConstant = 0.8;
     this.node.connect(this.analyser);
     this.node.connect(ctx.destination);
+    if (this.sinkId) await this.applySink().catch(() => {});
     if (ctx.state !== 'running') await ctx.resume();
+    if (this.built) this.onRebuild?.();
+    this.built = true;
+  }
+
+  async teardown() {
+    this.stopSource();
+    if (this.recorder) {
+      try { this.recorder.rec.stop(); } catch { /* bereits gestoppt */ }
+      this.recorder = null;
+    }
+    this.recDest = null;
+    this.buffers.clear(); // Demo-Puffer sind an die Abtastrate gebunden
+    const ctx = this.ctx;
+    this.ctx = null;
+    this.node = null;
+    try { await ctx.close(); } catch { /* bereits geschlossen */ }
   }
 
   setParams(p) {
@@ -61,9 +95,12 @@ export class Engine {
     this.node?.port.postMessage({ type: 'clear' });
   }
 
+  /** Geschätzte Gesamtlatenz in ms (Ausgang + ggf. Eingang des Live-Geräts). */
   get latencyMs() {
     if (!this.ctx) return null;
-    return ((this.ctx.baseLatency || 0) + (this.ctx.outputLatency || 0)) * 1000;
+    const out = (this.ctx.baseLatency || 0) + (this.ctx.outputLatency || 0);
+    const inp = this.source && this.source.kind === 'live' ? this.liveInfo?.latency || 0 : 0;
+    return (out + inp) * 1000;
   }
 
   // ---------- Quellen ----------
@@ -78,6 +115,8 @@ export class Engine {
         s.node.stop();
       }
       s.node.disconnect();
+      s.splitter?.disconnect();
+      s.merger?.disconnect();
     } catch { /* bereits gestoppt */ }
     if (s.stream) for (const t of s.stream.getTracks()) t.stop();
   }
@@ -110,31 +149,118 @@ export class Engine {
   }
 
   async listInputs() {
+    return this.listDevices('audioinput');
+  }
+
+  async listOutputs() {
+    return this.listDevices('audiooutput');
+  }
+
+  async listDevices(kind) {
     try {
       const devs = await navigator.mediaDevices.enumerateDevices();
-      return devs.filter((d) => d.kind === 'audioinput');
+      return devs.filter((d) => d.kind === kind);
     } catch {
       return [];
     }
   }
 
+  /** Fragt einmal die Freigabe an, damit Gerätenamen sichtbar werden. */
+  async requestDeviceAccess() {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    for (const t of stream.getTracks()) t.stop();
+  }
+
+  /**
+   * Startet ein Eingangsgerät. Liefert { label, channels, sampleRate, latency }.
+   * Alle Browser-Aufbereitungen (Echo, Rauschen, Pegelautomatik) sind aus.
+   */
   async startLive(deviceId) {
     this.stopSource();
-    const constraints = {
+    const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         deviceId: deviceId ? { exact: deviceId } : undefined,
         echoCancellation: false,
         noiseSuppression: false,
         autoGainControl: false,
-        channelCount: { ideal: 2 },
-        latency: 0,
+        channelCount: { ideal: 32 },
+        latency: { ideal: 0 },
       },
+    });
+    const track = stream.getAudioTracks()[0];
+    const st = (track && track.getSettings && track.getSettings()) || {};
+    try {
+      if (st.sampleRate && this.ctx.sampleRate !== st.sampleRate) await this.init({ sampleRate: st.sampleRate });
+      const src = this.ctx.createMediaStreamSource(stream);
+      const channels = Math.max(1, st.channelCount || 2);
+      const splitter = this.ctx.createChannelSplitter(Math.max(2, channels));
+      const merger = this.ctx.createChannelMerger(2);
+      src.connect(splitter);
+      merger.connect(this.input);
+      this.source = { kind: 'live', node: src, stream, splitter, merger, channels };
+      this.routeChannels(this.channelSel);
+    } catch (err) {
+      for (const t of stream.getTracks()) t.stop();
+      throw err;
+    }
+    track?.addEventListener('ended', () => {
+      if (this.source && this.source.stream === stream) {
+        this.stopSource();
+        this.onLiveEnded?.();
+      }
+    });
+    this.liveInfo = {
+      label: track?.label || '',
+      channels: this.source.channels,
+      sampleRate: st.sampleRate || this.ctx.sampleRate,
+      latency: typeof st.latency === 'number' ? st.latency : 0,
     };
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-    const node = this.ctx.createMediaStreamSource(stream);
-    node.connect(this.input);
-    this.source = { kind: 'live', node, stream };
-    return stream;
+    return this.liveInfo;
+  }
+
+  /**
+   * Kanalwahl für den Live-Eingang: `p<k>` = Paar k+1/k+2 (Stereo), `m<k>` = Kanal k+1 auf beide Seiten.
+   * Kann während des Spielens umgeschaltet werden.
+   */
+  routeChannels(sel) {
+    this.channelSel = sel;
+    const s = this.source;
+    if (!s || s.kind !== 'live') return;
+    const m = /^([pm])(\d+)$/.exec(sel) || [sel, 'p', '0'];
+    const n = s.channels;
+    let a = Math.min(Number(m[2]), n - 1);
+    let b = a;
+    if (m[1] === 'p' && n > 1) {
+      a = Math.min(a, n - 2);
+      b = a + 1;
+    }
+    s.splitter.disconnect();
+    s.splitter.connect(s.merger, a, 0);
+    s.splitter.connect(s.merger, b, 1);
+  }
+
+  /** Auswahl-Optionen für `channels` Eingangskanäle. */
+  static channelOptions(channels) {
+    if (channels <= 1) return [{ value: 'm0', label: 'Mono' }];
+    const opts = [];
+    for (let k = 0; k + 1 < channels; k += 2) opts.push({ value: `p${k}`, label: `${k + 1} + ${k + 2} (Stereo)` });
+    for (let k = 0; k < channels; k++) opts.push({ value: `m${k}`, label: `Kanal ${k + 1} (Mono)` });
+    return opts;
+  }
+
+  // ---------- Ausgabegerät ----------
+
+  get canSelectOutput() {
+    return typeof AudioContext !== 'undefined' && 'setSinkId' in AudioContext.prototype;
+  }
+
+  async setOutput(deviceId) {
+    this.sinkId = deviceId || '';
+    if (this.ctx) await this.applySink();
+  }
+
+  applySink() {
+    return this.ctx.setSinkId ? this.ctx.setSinkId(this.sinkId) : Promise.resolve();
   }
 
   // ---------- Aufnahme (Live-Ausgang) ----------
