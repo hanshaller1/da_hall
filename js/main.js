@@ -542,7 +542,8 @@ function setStatus(t) {
 let sDownAt = 0;
 document.addEventListener('keydown', (e) => {
   if (e.target.closest('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (e.code === 'Space' && !e.target.closest('button')) {
+  // Leertaste nur, wenn kein Button fokussiert ist (der würde sonst ausgelöst); B funktioniert immer
+  if ((e.code === 'Space' && !e.target.closest('button')) || e.key === 'b' || e.key === 'B') {
     e.preventDefault();
     setBypass(!live.bypass);
   } else if (e.key === 's' || e.key === 'S') {
