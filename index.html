@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DA HALL Ambient Reverb</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Stereo-Ambient-Reverb im Browser: fünf Algorithmen, Sustain, Stretch und erweiterte Parameter.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..800&family=Martian+Mono:wdth,wght@87.5..112.5,400..700&family=Unbounded:wght@300;500;700&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="page">
+
+  <header class="topbar">
+    <div class="brandline">
+      <span class="wordmark">DA HALL</span>
+      <span class="tagline">Stereo Ambient Reverb</span>
+    </div>
+    <div class="engine-status" id="engine-status" aria-live="polite">Audio aus · Starte eine Quelle</div>
+  </header>
+
+  <main>
+    <!-- ================= PEDAL ================= -->
+    <section class="pedal" id="pedal" aria-label="Reverb-Pedal">
+      <div class="screw s1"></div><div class="screw s2"></div><div class="screw s3"></div><div class="screw s4"></div>
+
+      <div class="pedal-knobs" id="main-knobs"></div>
+
+      <div class="pedal-mid">
+        <div class="display-bezel">
+          <canvas id="display" class="display" aria-label="Anzeige: Modus, Werte, Spektrum und Pegel" role="img"></canvas>
+        </div>
+        <div class="pedal-faders" id="faders"></div>
+        <div class="pedal-width" id="width-switch"></div>
+      </div>
+
+      <div class="pedal-bottom">
+        <div id="fs-bypass"></div>
+        <div class="nameplate" aria-hidden="true">
+          <span class="np-name">da hall</span>
+          <span class="np-sub">ambient reverb · 16-line fdn</span>
+        </div>
+        <div id="fs-sustain"></div>
+      </div>
+    </section>
+
+    <!-- ================= QUELLE & PRESETS ================= -->
+    <div class="panels">
+      <section class="panel" aria-labelledby="src-h">
+        <div class="panel-head">
+          <h2 id="src-h">Signalquelle</h2>
+          <div class="seg" role="tablist" aria-label="Quelle wählen">
+            <button type="button" role="tab" id="tab-demo" aria-selected="true" data-src="demo">Demo</button>
+            <button type="button" role="tab" id="tab-file" aria-selected="false" data-src="file">Datei</button>
+            <button type="button" role="tab" id="tab-live" aria-selected="false" data-src="live">Live-Eingang</button>
+          </div>
+        </div>
+
+        <div class="src-pane" data-pane="demo">
+          <div class="chips" id="demo-list" role="radiogroup" aria-label="Demo-Signal"></div>
+          <p class="note" id="demo-desc"></p>
+        </div>
+
+        <div class="src-pane" data-pane="file" hidden>
+          <label class="drop" id="drop">
+            <input type="file" id="file-input" accept="audio/*">
+            <span class="drop-main" id="file-name">Audiodatei wählen oder hierher ziehen</span>
+            <span class="note">WAV, MP3, OGG, FLAC, M4A · wird nur lokal verarbeitet</span>
+          </label>
+          <label class="check"><input type="checkbox" id="file-loop" checked> In Schleife abspielen</label>
+        </div>
+
+        <div class="src-pane" data-pane="live" hidden>
+          <label class="field">
+            <span>Eingangsgerät</span>
+            <select id="device-select"><option value="">Standard-Eingang</option></select>
+          </label>
+          <p class="note warn">Kopfhörer benutzen: Mit Lautsprechern und Mikrofon entsteht sofort eine Rückkopplung. Für Gitarre ein Audio-Interface verwenden und unter „Eingang“ den richtigen Kanal wählen.</p>
+        </div>
+
+        <div class="transport">
+          <button type="button" class="btn btn-primary" id="play-btn">Demo abspielen</button>
+          <button type="button" class="btn" id="rec-btn" disabled>Aufnehmen</button>
+          <button type="button" class="btn" id="export-btn" disabled title="Rendert die Quelle offline mit Hallfahne als 24-Bit-WAV">Als WAV rendern</button>
+          <a class="btn btn-link" id="download-link" hidden>Download</a>
+        </div>
+        <p class="note" id="transport-note" aria-live="polite"></p>
+      </section>
+
+      <section class="panel" aria-labelledby="preset-h">
+        <div class="panel-head">
+          <h2 id="preset-h">Presets</h2>
+          <span class="note" id="preset-current"></span>
+        </div>
+        <div class="preset-grid" id="factory-presets"></div>
+        <div class="user-presets" id="user-presets"></div>
+        <form class="preset-save" id="preset-form">
+          <label class="sr-only" for="preset-name">Name für eigenes Preset</label>
+          <input type="text" id="preset-name" placeholder="Name für eigenes Preset" maxlength="32" autocomplete="off">
+          <button type="submit" class="btn">Speichern</button>
+        </form>
+        <div class="preset-tools">
+          <button type="button" class="btn btn-small" id="share-btn">Link kopieren</button>
+          <button type="button" class="btn btn-small" id="export-presets">Presets exportieren</button>
+          <label class="btn btn-small file-btn">Importieren<input type="file" id="import-presets" accept="application/json,.json"></label>
+          <button type="button" class="btn btn-small" id="reset-btn">Init</button>
+        </div>
+        <input type="text" class="share-field" id="share-field" readonly hidden aria-label="Teilen-Link">
+      </section>
+    </div>
+
+    <!-- ================= ERWEITERT ================= -->
+    <section class="backpanel" aria-labelledby="adv-h">
+      <div class="panel-head">
+        <h2 id="adv-h">Erweiterte Parameter</h2>
+        <span class="note">Ziehen, Mausrad oder Pfeiltasten · Shift = fein · Doppelklick = Standard</span>
+      </div>
+      <div class="adv-groups">
+        <div class="adv-group"><h3>Raum</h3><div class="adv-knobs" id="g-room"></div></div>
+        <div class="adv-group"><h3>Klang</h3><div class="adv-knobs" id="g-tone"></div></div>
+        <div class="adv-group"><h3>Dynamik</h3><div class="adv-knobs" id="g-dyn"></div></div>
+        <div class="adv-group"><h3>Pegel</h3><div class="adv-knobs" id="g-level"></div></div>
+      </div>
+      <div class="adv-switches">
+        <label class="field">
+          <span>Eingang</span>
+          <select id="input-mode"></select>
+        </label>
+        <label class="check"><input type="checkbox" id="trails"> Trails (Fahne klingt im Bypass aus)</label>
+        <label class="check"><input type="checkbox" id="kill-dry"> Kill Dry (für Parallel-Loops)</label>
+        <button type="button" class="btn btn-small" id="tap-btn" title="Im Rain-Modus: Delay-Zeit eintappen">Tap · Rain</button>
+        <button type="button" class="btn btn-small" id="clear-btn">Hall leeren</button>
+      </div>
+    </section>
+
+    <!-- ================= ANLEITUNG ================= -->
+    <section class="manual" aria-labelledby="man-h">
+      <h2 id="man-h">Kurzanleitung</h2>
+      <div class="manual-grid">
+        <div class="manual-modes" id="manual-modes"></div>
+        <div class="manual-text">
+          <h3>Regler auf dem Pedal</h3>
+          <dl>
+            <dt>Decay</dt><dd>Nachhallzeit von 0,4 bis 40 s. Im Dream-Modus 1,5× länger.</dd>
+            <dt>Filter</dt><dd>Links vom Zentrum Tiefpass bis 300 Hz, rechts Hochpass bis 2,5 kHz.</dd>
+            <dt>Depth</dt><dd>Modulation der 16 Delay-Linien: von glasklar bis chorusartig.</dd>
+            <dt>Mix</dt><dd>Bis zur Mitte bleibt das Direktsignal voll, danach wird es leiser.</dd>
+            <dt>Stretch</dt><dd>Zieht den Aufbau des Halls in die Länge (Bloom bis ca. 2,7 s).</dd>
+            <dt>Width</dt><dd>Stereobreite der Fahne: Narrow, Medium, Wide.</dd>
+            <dt>Sustain</dt><dd>Friert die Fahne ein. Kurz treten schaltet um, lang halten wirkt nur, solange du drückst.</dd>
+          </dl>
+          <h3>Tastatur</h3>
+          <p class="keys"><kbd>Leertaste</kbd> Bypass · <kbd>S</kbd> Sustain · <kbd>1</kbd>–<kbd>5</kbd> Modus · <kbd>P</kbd> Start/Stopp</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>DA HALL läuft vollständig im Browser (Web Audio, AudioWorklet). Kein Upload, keine Konten.</span>
+  </footer>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
