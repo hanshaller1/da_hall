@@ -1,0 +1,72 @@
+# Testet die DSP und veröffentlicht die App auf GitHub Pages.
+# Einmalig nötig: Settings → Pages → Build and deployment → Source: „GitHub Actions“.
+name: Pages
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm test
+
+  check:
+    # Pages noch nicht aktiviert → Deployment überspringen statt fehlschlagen
+    runs-on: ubuntu-latest
+    if: github.ref_name == github.event.repository.default_branch
+    outputs:
+      enabled: ${{ steps.pages.outputs.enabled }}
+    steps:
+      - id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/pages")
+          if [ "$code" = "404" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GitHub Pages ist noch nicht aktiviert. Deployment übersprungen."
+            {
+              echo "### GitHub Pages ist noch nicht aktiviert"
+              echo "Settings → Pages → Build and deployment → Source: **GitHub Actions** wählen,"
+              echo "dann diesen Workflow erneut ausführen (Actions → Pages → Run workflow)."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    needs: [test, check]
+    if: needs.check.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Seite zusammenstellen (nur was der Browser braucht)
+        run: |
+          mkdir -p _site
+          cp -r index.html css js _site/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

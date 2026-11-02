@@ -13,9 +13,24 @@ npm start          # http://localhost:8080
 
 Alternativ funktioniert jeder statische Webserver, z. B. `python3 -m http.server 8080`.
 Ein direktes Öffnen per `file://` funktioniert nicht, weil Browser AudioWorklets nur über `http(s)` oder `localhost` laden.
-Für GitHub Pages reicht es, den Branch als Pages-Quelle einzustellen.
 
 Unterstützt werden aktuelle Versionen von Chrome, Edge, Firefox und Safari.
+
+## Online über GitHub Pages
+
+Der Workflow `.github/workflows/pages.yml` führt bei jedem Push die Tests aus und veröffentlicht die App
+vom Standard-Branch aus unter **https://hanshaller1.github.io/da_hall/**. Über https funktioniert auch der Live-Eingang.
+
+Einmalige Einrichtung:
+
+1. **Sichtbarkeit:** Mit einem kostenlosen GitHub-Konto gibt es Pages nur für öffentliche Repositories
+   (Settings → General → Danger Zone → Change visibility). Mit GitHub Pro geht es auch privat;
+   die veröffentlichte Seite ist aber in jedem Fall öffentlich erreichbar.
+2. **Settings → Pages → Build and deployment → Source: „GitHub Actions“** wählen.
+3. **Actions → Pages → Run workflow** starten (oder einfach den nächsten Push abwarten).
+
+Solange Pages nicht aktiviert ist, läuft der Workflow trotzdem grün durch: Die Tests werden ausgeführt,
+das Deployment wird mit einem Hinweis übersprungen.
 
 ## Bedienung
 
